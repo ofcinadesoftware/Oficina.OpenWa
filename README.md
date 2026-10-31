@@ -8,10 +8,20 @@ Este repositório fica **dentro** de um clone do OpenWA original, na pasta `ofic
 
 ```
 /opt/openwa/            clone de github.com/rmyndharis/OpenWA, no tag da versão em uso
-/opt/openwa/oficina/    este repositório (Oficina.OpenWa)
+/opt/openwa/oficina/    arquivos deste repositório (Oficina.OpenWa) + segredos (.env etc., fora do git)
 ```
 
-No PC é igual: `Oficina.Software/OpenWA/` (original) e `Oficina.Software/OpenWA/oficina/` (este). O clone do original ignora a pasta pela linha `oficina/` em `.git/info/exclude`.
+No PC: `Oficina.Software/OpenWA/` (clone do original) e `Oficina.Software/OpenWA/oficina/` (clone deste repositório). O clone do original ignora a pasta pela linha `oficina/` em `.git/info/exclude`.
+
+A VM não tem acesso ao GitHub (como no Kid Money e no Accounts): os arquivos deste repositório vão do PC para lá, sempre a partir de um commit, e `.versao-deploy` registra qual commit está na VM:
+
+```bash
+cd Oficina.Software/OpenWA/oficina
+git archive HEAD | ssh -i ~/.ssh/oficina_vps ubuntu@147.15.7.73 'cd /opt/openwa/oficina && tar -x'
+ssh -i ~/.ssh/oficina_vps ubuntu@147.15.7.73 "echo 'commit=$(git rev-parse --short HEAD) (ofcinadesoftware/Oficina.OpenWa)' > /opt/openwa/oficina/.versao-deploy"
+```
+
+O `tar` só sobrescreve os arquivos versionados; `.env`, `chaves-apps.env` e `painel-senha.txt` ficam intactos.
 
 Não há fork: as versões novas do OpenWA vêm direto do original (`git fetch --tags`), e nós escolhemos quando trocar de tag. Fork só se um dia precisarmos corrigir o código antes do autor.
 
@@ -20,7 +30,7 @@ Não há fork: as versões novas do OpenWA vêm direto do original (`git fetch -
 | Item | Valor |
 |---|---|
 | VM | `instance-kidmoney` (Oracle Cloud, ARM64), a mesma do Kid Money. Detalhes: `KidMoney/docs/servidor-producao.md` |
-| Pasta | `/opt/openwa` (clone deste repo no tag da versão) + `/opt/openwa/oficina/.env` |
+| Pasta | `/opt/openwa` (clone do OpenWA original no tag da versão) + `/opt/openwa/oficina` (este repositório + `.env`) |
 | Versão | fixa: imagem `oficina-openwa:<OPENWA_VERSION>`, construída do tag `v<OPENWA_VERSION>` (hoje 0.26.0) |
 | Acesso público | `https://wa.oficinadesoftware.com` (o `wa.oficinadesoftware.com.br` já está no Caddy, mas ainda sem DNS; painel, API em `/api/`, Swagger em `/api/docs`), pelo Caddy do Kid Money (`/opt/kidmoney/Caddyfile`, rede `kidmoney_edge`) |
 | Acesso interno | `http://openwa:2785/api/` pela rede Docker `openwa`, para apps na mesma VM (não passa pelo Caddy) |
@@ -34,9 +44,10 @@ Não há fork: as versões novas do OpenWA vêm direto do original (`git fetch -
 
 ```bash
 sudo mkdir -p /opt/openwa && sudo chown ubuntu:ubuntu /opt/openwa
-git clone <repo do fork> /opt/openwa && cd /opt/openwa && git checkout v0.26.0
-mkdir -p backups && sudo chown 997:997 backups      # 997 = usuário openwa do container
-cd oficina && cp .env.exemplo .env && chmod 600 .env
+git clone --branch v0.26.0 --depth 1 https://github.com/rmyndharis/OpenWA.git /opt/openwa
+mkdir -p /opt/openwa/backups /opt/openwa/oficina && sudo chown 997:997 /opt/openwa/backups   # 997 = usuário openwa do container
+# enviar os arquivos deste repositório (ver "Estrutura") e então:
+cd /opt/openwa/oficina && cp .env.exemplo .env && chmod 600 .env
 # preencher API_MASTER_KEY e API_KEY_PEPPER (openssl rand -hex 32) e SSRF_ALLOWED_HOSTS
 docker compose up -d --build                         # build arm64 na própria VM (demora alguns minutos)
 chmod +x backup-openwa.sh && (crontab -l; echo '30 4 * * * /opt/openwa/oficina/backup-openwa.sh >> /opt/openwa/backup.log 2>&1') | crontab -
@@ -74,7 +85,7 @@ Cada projeto usa sessões com o próprio prefixo e registra os próprios webhook
 
 Uma chave por ambiente: assim o sandbox não alcança as sessões da produção, e revogar uma não derruba a outra. Cada ambiente registra o webhook (com o próprio `secret`) só nas próprias sessões. Eventos do Hikya: `message.received`, `message.sent`, `message.ack`, `message.failed`, `session.status`.
 
-As chaves ficam em `/opt/openwa/oficina/chaves-apps.env` na VM (`chmod 600`, fora do git) e são copiadas de lá para o `.env` do app, também na VM. Nunca vão para repositório nem chat. Hoje as duas são OPERATOR sem escopo de sessões, porque o Hikya cria sessões pela tela dele (criar sessão exige chave sem escopo). Se o Hikya fixar o IP dos containers na rede `openwa`, dá para restringir cada chave com `allowedIps` (`PUT /api/auth/api-keys/{id}`).
+As chaves ficam em `/opt/openwa/oficina/chaves-apps.env` na VM (`chmod 600`, fora do git) e são copiadas de lá para o `.env` do app, também na VM. Nunca vão para repositório nem chat. As duas são OPERATOR sem escopo de sessões, porque o Hikya cria sessões pela tela dele (criar sessão exige chave sem escopo). Em compensação, cada uma só vale a partir do IP fixo do seu container (`allowedIps`: `172.21.100.10/32` e `172.21.100.11/32`): usadas de qualquer outro lugar, inclusive pela internet, dão 403. Mudou o IP? `PUT /api/auth/api-keys/{id}` com o novo `allowedIps`.
 
 Mudou URL, porta ou chave? Avise a sessão do app para ela ajustar a configuração.
 
@@ -82,11 +93,12 @@ Regra de testes: mensagens de teste só para **5592991258492**.
 
 ## Atualizar
 
-```bash
-# no PC: trazer o upstream para o fork
-git fetch upstream --tags && git merge upstream/main && git push --tags && git push
+**Nosso deploy** (compose, backup, docs): commit e push aqui, depois envie para a VM (ver "Estrutura") e rode `docker compose up -d` em `/opt/openwa/oficina`.
 
-# na VM: trocar o tag e a versão juntos
+**Versão do OpenWA**: as versões saem em github.com/rmyndharis/OpenWA/releases. Nada atualiza sozinho:
+
+```bash
+# na VM: trocar o tag e a versão juntos (o .env.exemplo do repositório também, para registrar)
 cd /opt/openwa && git fetch --tags && git checkout vX.Y.Z
 sed -i 's/^OPENWA_VERSION=.*/OPENWA_VERSION=X.Y.Z/' oficina/.env
 cd oficina && ./backup-openwa.sh && docker compose up -d --build
