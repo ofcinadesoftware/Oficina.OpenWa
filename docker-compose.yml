@@ -1,0 +1,114 @@
+# OpenWA da Oficina de Software, na VM do Kid Money (Oracle Cloud, Ubuntu ARM64), em /opt/openwa.
+#   /opt/openwa/                 clone deste repositório, no tag da versão em uso (ex.: v0.26.0)
+#   /opt/openwa/oficina/.env     segredos (chmod 600, fora do git; modelo em .env.exemplo)
+#   /opt/openwa/backups/         backups diários (backup-openwa.sh no cron)
+# Dois acessos:
+#  - público: https://<OPENWA_HOST> (painel, API e Swagger), pelo Caddy do Kid Money na rede kidmoney_edge;
+#  - interno: http://openwa:2785 pela rede "openwa", para apps na mesma VM (sem passar pelo Caddy).
+# Subir/atualizar (de /opt/openwa/oficina): docker compose up -d --build
+#
+# Diferenças em relação ao docker-compose.yml da raiz (upstream):
+#  - sem docker-proxy: não usamos a orquestração de Postgres/Redis/MinIO pelo painel (e ela daria ao
+#    container acesso ao Docker do host, onde também roda o Kid Money);
+#  - só as variáveis que usamos; as demais ficam no padrão do app.
+
+name: openwa
+
+services:
+  openwa:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    # Versão fixa: troque junto com o checkout do tag (git checkout vX.Y.Z) ao atualizar.
+    image: oficina-openwa:${OPENWA_VERSION:?defina OPENWA_VERSION no .env, ex. 0.26.0}
+    container_name: openwa
+    restart: unless-stopped
+    # 75s do upstream + 5s porque o drain de webhooks abaixo subiu de 5s para 10s.
+    stop_grace_period: 80s
+    # Mesmo endurecimento do compose upstream (ver comentários lá).
+    security_opt:
+      - 'no-new-privileges:true'
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]
+    read_only: true
+    tmpfs:
+      - /tmp
+    pids_limit: 2048
+    # whatsapp-web.js abre um Chromium por sessão (~300-500 MB cada).
+    mem_limit: ${OPENWA_MEM_LIMIT:-3g}
+    # Só no loopback do host (manutenção pela VM). Nunca publique em 0.0.0.0: o público entra pelo Caddy.
+    ports:
+      - '127.0.0.1:2785:2785'
+    environment:
+      NODE_ENV: production
+      TZ: America/Manaus
+      HOME: /tmp
+      XDG_CONFIG_HOME: /tmp/.config
+      XDG_CACHE_HOME: /tmp/.cache
+      PORT: '2785'
+      LOG_LEVEL: info
+
+      # Banco SQLite no volume (poucas sessões).
+      DATABASE_TYPE: sqlite
+      DATABASE_NAME: ./data/openwa.sqlite
+      DATABASE_SYNCHRONIZE: 'false'
+      STORAGE_TYPE: local
+      STORAGE_LOCAL_PATH: ./data/media
+      REDIS_ENABLED: 'false'
+
+      # Motor pedido pelo Hikya Chat (o que a POC validou). Trocar de motor exige parear de novo.
+      ENGINE_TYPE: whatsapp-web.js
+      PUPPETEER_EXECUTABLE_PATH: /usr/local/bin/puppeteer-chrome
+      # Reconecta sozinho as sessões já pareadas quando o container reinicia.
+      AUTO_START_SESSIONS: 'true'
+      # Fixo: o padrão é o hostname do container, que muda a cada recriação.
+      NODE_ID: oficina-vm-kidmoney
+      # Anti-ban: limita o ritmo de envio em números recém-pareados.
+      SEND_PACING_ENABLED: 'true'
+
+      # Webhooks para containers da rede interna: o guarda de SSRF bloqueia hosts privados,
+      # então cada app que recebe webhook entra nesta lista (nome do serviço na rede "openwa").
+      SSRF_ALLOWED_HOSTS: ${SSRF_ALLOWED_HOSTS:-}
+      # Igual ao WEBHOOK_TIMEOUT (10s): ao desligar, espera a entrega em andamento terminar.
+      WEBHOOK_SHUTDOWN_DRAIN_MS: '10000'
+
+      BASE_URL: https://${OPENWA_HOST:?defina OPENWA_HOST no .env}
+      DASHBOARD_URL: https://${OPENWA_HOST}
+      # Só confia no X-Forwarded-For vindo da rede do Caddy (IP real do cliente para rate limit e allowedIps).
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-true}
+      UPDATE_CHECK_ENABLED: 'false'
+
+      # Segurança. A chave ADMIN inicial só é usada no primeiro boot (sem nenhuma chave no banco).
+      API_MASTER_KEY: ${API_MASTER_KEY:?defina API_MASTER_KEY no .env (32+ caracteres)}
+      # Não troque depois do primeiro boot: invalida todas as chaves.
+      API_KEY_PEPPER: ${API_KEY_PEPPER:?defina API_KEY_PEPPER no .env}
+    volumes:
+      - openwa-data:/app/data
+      # Destino do scripts/backup.sh (pasta do host com dono 997, o usuário openwa do container).
+      - ../backups:/backups
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:2785/api/health/ready']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks: [openwa, kidmoney_edge]
+
+volumes:
+  openwa-data:
+    name: openwa_data
+
+networks:
+  # Rede compartilhada com os apps que usam o OpenWA (o compose deles a declara como external).
+  # Sub-rede fixa: os apps fixam ipv4_address aqui e as chaves de API são restritas por allowedIps.
+  # Faixa 172.21.100.x reservada para IPs fixos dos apps (o Docker distribui os dinâmicos a partir de .0.2).
+  openwa:
+    name: openwa
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+          gateway: 172.21.0.1
+  # Rede "edge" do compose do Kid Money, onde está o Caddy (172.18.0.0/16).
+  kidmoney_edge:
+    external: true

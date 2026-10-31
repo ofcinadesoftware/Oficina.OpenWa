@@ -1,0 +1,4 @@
+# Segredos: só na VM
+.env
+chaves-apps.env
+painel-senha.txt
