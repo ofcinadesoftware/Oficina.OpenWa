@@ -33,7 +33,7 @@ Não há fork: as versões novas do OpenWA vêm direto do original (`git fetch -
 | Pasta | `/opt/openwa` (clone do OpenWA original no tag da versão) + `/opt/openwa/oficina` (este repositório + `.env`) |
 | Versão | fixa: imagem `oficina-openwa:<OPENWA_VERSION>`, construída do tag `v<OPENWA_VERSION>` (hoje 0.26.0) |
 | Acesso público | `https://wa.oficinadesoftware.com` (o `wa.oficinadesoftware.com.br` já está no Caddy, mas ainda sem DNS; painel, API em `/api/`, Swagger em `/api/docs`), pelo Caddy do Kid Money (`/opt/kidmoney/Caddyfile`, rede `kidmoney_edge`) |
-| Acesso interno | `http://openwa:2785/api/` pela rede Docker `openwa`, para apps na mesma VM (não passa pelo Caddy) |
+| Acesso interno | `http://openwa-interno:2785/api/` pela rede Docker `openwa`, para apps na mesma VM (não passa pelo Caddy) |
 | Proteção | painel e Swagger pedem usuário `oficina` + senha no Caddy (senha só na VM: `/opt/openwa/oficina/painel-senha.txt`); `/api/*` fica aberto e exige chave. Chaves de apps na VM são restritas por `allowedIps` ao IP fixo do container |
 | DNS | registro A `wa` → `147.15.7.73` na zona `oficinadesoftware.com` (cPanel da HostGator). Para ativar o .com.br: criar o A `wa` na Cloudflare ("DNS only"); o Caddy emite o certificado sozinho |
 | Engine | whatsapp-web.js (um Chromium por sessão; limite de memória 3 GB) |
@@ -65,12 +65,14 @@ Depois, no painel (`https://wa.oficinadesoftware.com`, primeiro a senha do Caddy
 services:
   hikyachat-api:
     environment:
-      OpenWA__Url: http://openwa:2785/api/
+      OpenWA__Url: http://openwa-interno:2785/api/
     networks: [default, openwa]
 networks:
   openwa:
     external: true
 ```
+
+Use sempre `openwa-interno`, não `openwa`: se o app também estiver na `kidmoney_edge` (rede do Caddy), `openwa` resolve pelo IP de lá e a chave dá 403.
 
 E no `.env` do OpenWA, o nome do serviço entra em `SSRF_ALLOWED_HOSTS` (senão o OpenWA recusa entregar o webhook num host da rede privada). Depois: `docker compose up -d`.
 

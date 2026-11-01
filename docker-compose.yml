@@ -4,7 +4,7 @@
 #   /opt/openwa/backups/         backups diários (backup-openwa.sh no cron)
 # Dois acessos:
 #  - público: https://<OPENWA_HOST> (painel, API e Swagger), pelo Caddy do Kid Money na rede kidmoney_edge;
-#  - interno: http://openwa:2785 pela rede "openwa", para apps na mesma VM (sem passar pelo Caddy).
+#  - interno: http://openwa-interno:2785 pela rede "openwa", para apps na mesma VM (sem passar pelo Caddy).
 # Subir/atualizar (de /opt/openwa/oficina): docker compose up -d --build
 #
 # Diferenças em relação ao docker-compose.yml da raiz (upstream):
@@ -93,7 +93,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    networks: [openwa, kidmoney_edge]
+    networks:
+      openwa:
+        # Nome que só existe nesta rede. Apps que também estão na kidmoney_edge resolvem "openwa" pelo IP da
+        # edge, a chamada sai com o IP errado e a chave (allowedIps) dá 403. Por isso os apps usam este nome.
+        aliases: [openwa-interno]
+      kidmoney_edge: {}
 
 volumes:
   openwa-data:
