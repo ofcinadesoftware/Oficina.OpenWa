@@ -87,6 +87,18 @@ Uma chave por ambiente: assim o sandbox não alcança as sessões da produção,
 
 As chaves ficam em `/opt/openwa/oficina/chaves-apps.env` na VM (`chmod 600`, fora do git) e são copiadas de lá para o `.env` do app, também na VM. Nunca vão para repositório nem chat. As duas são OPERATOR sem escopo de sessões, porque o Hikya cria sessões pela tela dele (criar sessão exige chave sem escopo). Em compensação, cada uma só vale a partir do IP fixo do seu container (`allowedIps`: `172.21.100.10/32` e `172.21.100.11/32`): usadas de qualquer outro lugar, inclusive pela internet, dão 403. Mudou o IP? `PUT /api/auth/api-keys/{id}` com o novo `allowedIps`.
 
+### Apps que criam sessões dividem a mesma instância
+
+Criar sessão exige chave sem escopo de sessões, e uma chave sem escopo enxerga, envia e registra webhook em **todas** as sessões da instância, criadas por qualquer chave (o OpenWA não guarda quem criou a sessão). Hoje Hikya e Karfy (produção e sandbox) dividem esta instância de propósito, até o Hikya virar a camada de WhatsApp dos apps. Por isso, todo app que usa esta instância segue estas regras:
+
+- Usa só os `sessionId` gravados no próprio banco. Nunca lista sessões para escolher uma e nunca aceita `sessionId` vindo da tela ou da requisição.
+- Registra webhook só nas próprias sessões e descarta evento de sessão desconhecida.
+- Dá às sessões nomes com o prefixo do app (`hikya-`, `karfy-`).
+- Tem uma chave por ambiente, OPERATOR, presa ao IP fixo do container.
+- No sandbox, usa só números de teste.
+
+Quando o primeiro cliente externo pagante conectar um número, separe as instâncias.
+
 Mudou URL, porta ou chave? Avise a sessão do app para ela ajustar a configuração.
 
 Regra de testes: mensagens de teste só para **5592991258492**.
