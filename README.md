@@ -82,6 +82,8 @@ Cada projeto usa sessões com o próprio prefixo e registra os próprios webhook
 |---|---|---|---|
 | Hikya Chat (produção) | `/opt/hikyachat`, serviço `hikyachat-api`, IP fixo 172.21.100.10 | `hikyachat` | `http://hikyachat-api:8080/webhooks/openwa` |
 | Hikya Chat (sandbox) | `/opt/hikyachat`, serviço `hikyachat-api-sandbox`, IP fixo 172.21.100.11 | `hikyachat-sandbox` | `http://hikyachat-api-sandbox:8080/webhooks/openwa` |
+| Karfy (sandbox) | `/opt/karfy-sandbox`, serviço `api` (alias `karfy-sandbox-api`), IP fixo 172.21.100.21 | `karfy-sandbox` | `http://karfy-sandbox-api:8080/webhooks/whatsapp` |
+| Karfy (produção, ainda não subiu) | alias `karfy-api`, IP fixo 172.21.100.20 | a criar | `http://karfy-api:8080/webhooks/whatsapp` |
 
 Uma chave por ambiente: assim o sandbox não alcança as sessões da produção, e revogar uma não derruba a outra. Cada ambiente registra o webhook (com o próprio `secret`) só nas próprias sessões. Eventos do Hikya: `message.received`, `message.sent`, `message.ack`, `message.failed`, `session.status`.
 
