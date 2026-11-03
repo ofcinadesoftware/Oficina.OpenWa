@@ -36,7 +36,7 @@ Não há fork: as versões novas do OpenWA vêm direto do original (`git fetch -
 | Acesso interno | `http://openwa-interno:2785/api/` pela rede Docker `openwa`, para apps na mesma VM (não passa pelo Caddy) |
 | Proteção | painel e Swagger pedem usuário `oficina` + senha no Caddy (senha só na VM: `/opt/openwa/oficina/painel-senha.txt`); `/api/*` fica aberto e exige chave. Chaves de apps na VM são restritas por `allowedIps` ao IP fixo do container |
 | DNS | registro A `wa` → `147.15.7.73` na zona `oficinadesoftware.com` (cPanel da HostGator). Para ativar o .com.br: criar o A `wa` na Cloudflare ("DNS only"); o Caddy emite o certificado sozinho |
-| Engine | whatsapp-web.js (um Chromium por sessão; limite de memória 3 GB) |
+| Engine | Baileys desde 03/11/2026 (sem navegador). O whatsapp-web.js 1.34.7 parou de gerar QR com o WhatsApp Web atual; trocar de motor exige ler o QR de todas as sessões de novo |
 | Dados | volume `openwa_data`: SQLite, sessões pareadas, mídia |
 | Backup | `backup-openwa.sh` no cron às 04:30 → `/opt/openwa/backups`, 14 dias |
 

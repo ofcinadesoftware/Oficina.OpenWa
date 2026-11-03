@@ -34,7 +34,7 @@ services:
     tmpfs:
       - /tmp
     pids_limit: 2048
-    # whatsapp-web.js abre um Chromium por sessão (~300-500 MB cada).
+    # Folga para voltar ao whatsapp-web.js (um Chromium por sessão, ~300-500 MB cada); o Baileys usa bem menos.
     mem_limit: ${OPENWA_MEM_LIMIT:-3g}
     # Só no loopback do host (manutenção pela VM). Nunca publique em 0.0.0.0: o público entra pelo Caddy.
     ports:
@@ -56,9 +56,12 @@ services:
       STORAGE_LOCAL_PATH: ./data/media
       REDIS_ENABLED: 'false'
 
-      # Motor pedido pelo Hikya Chat (o que a POC validou). Trocar de motor exige parear de novo.
-      ENGINE_TYPE: whatsapp-web.js
+      # Baileys desde 03/11/2026: o whatsapp-web.js 1.34.7 parou de gerar QR com o WhatsApp Web atual
+      # ("reading 'Socket'"). Sem navegador, gasta bem menos memória. Trocar de motor exige parear de novo.
+      ENGINE_TYPE: baileys
       PUPPETEER_EXECUTABLE_PATH: /usr/local/bin/puppeteer-chrome
+      # Preenche data.senderPhone (só dígitos) quando o remetente vem como @lid.
+      RESOLVE_LID_TO_PHONE: 'true'
       # Reconecta sozinho as sessões já pareadas quando o container reinicia.
       AUTO_START_SESSIONS: 'true'
       # Fixo: o padrão é o hostname do container, que muda a cada recriação.
