@@ -86,6 +86,8 @@ Cada projeto usa sessões com o próprio prefixo e registra os próprios webhook
 | Hikya Chat (sandbox) | `/opt/hikyachat`, serviço `hikyachat-api-sandbox`, IP fixo 172.21.100.11 | `hikyachat-sandbox` | `http://hikyachat-api-sandbox:8080/webhooks/openwa` |
 | Karfy (sandbox) | `/opt/karfy-sandbox`, serviço `api` (alias `karfy-sandbox-api`), IP fixo 172.21.100.21 | `karfy-sandbox` | `http://karfy-sandbox-api:8080/webhooks/whatsapp` |
 | Karfy (produção, ainda não subiu) | alias `karfy-api`, IP fixo 172.21.100.20 | a criar | `http://karfy-api:8080/webhooks/whatsapp` |
+| Kid Money (sandbox) | `/opt/kidmoney`, serviço `api-sandbox` (alias `kidmoney-api-sandbox`), IP fixo 172.21.100.31 | `kidmoney-sandbox` (só a sessão `kidmoney-sandbox` e o chat 5592991258492) | `http://kidmoney-api-sandbox:8080/webhooks/whatsapp` (cadastrado com a chave admin: a chave do app não alcança `/webhooks`) |
+| Kid Money (produção, aguarda o Bruno) | serviço `api-prod` (alias `kidmoney-api`), IP fixo 172.21.100.30 | `kidmoney-prod` (só a sessão `kidmoney-prod`) | `http://kidmoney-api:8080/webhooks/whatsapp` |
 
 Uma chave por ambiente: assim o sandbox não alcança as sessões da produção, e revogar uma não derruba a outra. Cada ambiente registra o webhook (com o próprio `secret`) só nas próprias sessões. Eventos do Hikya: `message.received`, `message.sent`, `message.ack`, `message.failed`, `session.status`.
 
