@@ -85,7 +85,7 @@ Cada projeto usa sessões com o próprio prefixo e registra os próprios webhook
 | Hikya Chat (produção) | `/opt/hikyachat`, serviço `hikyachat-api`, IP fixo 172.21.100.10 | `hikyachat` | `http://hikyachat-api:8080/webhooks/openwa` |
 | Hikya Chat (sandbox) | `/opt/hikyachat`, serviço `hikyachat-api-sandbox`, IP fixo 172.21.100.11 | `hikyachat-sandbox` | `http://hikyachat-api-sandbox:8080/webhooks/openwa` |
 | Karfy (sandbox) | `/opt/karfy-sandbox`, serviço `api` (alias `karfy-sandbox-api`), IP fixo 172.21.100.21 | `karfy-sandbox` | `http://karfy-sandbox-api:8080/webhooks/whatsapp` |
-| Karfy (produção, ainda não subiu) | alias `karfy-api`, IP fixo 172.21.100.20 | a criar | `http://karfy-api:8080/webhooks/whatsapp` |
+| Karfy (produção) | `/opt/karfy`, serviço `api` (alias `karfy-api`), IP fixo 172.21.100.20 | `karfy-prod` (criada em 08/11/2026; chave e segredo do webhook em `chaves-apps.env` e no `/opt/karfy/.env`) | `http://karfy-api:8080/webhooks/whatsapp` |
 | Kid Money (sandbox) | `/opt/kidmoney`, serviço `api-sandbox` (alias `kidmoney-api-sandbox`), IP fixo 172.21.100.31 | `kidmoney-sandbox` (só a sessão `kidmoney-sandbox` e o chat 5592991258492) | `http://kidmoney-api-sandbox:8080/webhooks/whatsapp` (cadastrado com a chave admin: a chave do app não alcança `/webhooks`) |
 | Kid Money (produção) | `/opt/kidmoney`, serviço `api-prod` (alias `kidmoney-api-prod`), IP fixo 172.21.100.32 | `kidmoney-sandbox`, a mesma do sandbox: por decisão do Bruno, a produção usa a sessão e o número do sandbox, travada no chat 5592991258492. A chave `kidmoney-prod` e a sessão `kidmoney-prod` ficam sem uso até ter número próprio | `http://kidmoney-api-prod:8080/webhooks/whatsapp` (mesmo segredo do sandbox; a sessão entrega para os dois) |
 
@@ -130,4 +130,4 @@ Leia o `CHANGELOG.md` antes: algumas versões pedem migração (`docs/14-migrati
 
 ## Riscos
 
-O WhatsApp não autoriza clientes não oficiais: um número pode ser banido, principalmente com envio em massa ou para quem não tem o número salvo. O `SEND_PACING_ENABLED` ajuda, mas não elimina o risco. Use números que a gente aceite perder.
+O WhatsApp não autoriza clientes não oficiais: um número pode ser banido, principalmente com envio em massa ou para quem não tem o número salvo. O `SEND_PACING_ENABLED` ajuda, mas não elimina o risco. Desde 08/11/2026 o limite diário geral é fixo em 300 por sessão (`SEND_PACING_WARMUP_SCHEDULE`): a rampa padrão (20, 40, 80... pela idade da sessão no OpenWA, não do número) conta também o que se digita no celular e travou a Lume, número antigo, no primeiro dia. A trava de conversas novas (`SEND_PACING_COLD_DAILY_CAP`, 5, 10, 20... por dia) continua no padrão, e é ela que protege número novo. Número recém-criado no WhatsApp: considere voltar a rampa. Use números que a gente aceite perder.

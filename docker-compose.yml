@@ -68,6 +68,10 @@ services:
       NODE_ID: oficina-vm-kidmoney
       # Anti-ban: limita o ritmo de envio em números recém-pareados.
       SEND_PACING_ENABLED: 'true'
+      # Limite diário de envios por sessão. O padrão (20, 40, 80... pela idade da sessão no OpenWA) é para
+      # número novo e conta até o que se digita no celular: travou a Lume (número antigo) no 1º dia (08/11/2026).
+      # 300 fixo; a trava de conversas novas (SEND_PACING_COLD_DAILY_CAP, 5, 10, 20...) continua no padrão.
+      SEND_PACING_WARMUP_SCHEDULE: ${SEND_PACING_WARMUP_SCHEDULE:-300}
 
       # Webhooks para containers da rede interna: o guarda de SSRF bloqueia hosts privados,
       # então cada app que recebe webhook entra nesta lista (nome do serviço na rede "openwa").
