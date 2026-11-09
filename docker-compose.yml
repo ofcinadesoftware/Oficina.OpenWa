@@ -72,6 +72,10 @@ services:
       # número novo e conta até o que se digita no celular: travou a Lume (número antigo) no 1º dia (08/11/2026).
       # 300 fixo; a trava de conversas novas (SEND_PACING_COLD_DAILY_CAP, 5, 10, 20...) continua no padrão.
       SEND_PACING_WARMUP_SCHEDULE: ${SEND_PACING_WARMUP_SCHEDULE:-300}
+      # Não se anuncia "online" ao conectar. Com o padrão (true) o WhatsApp para de notificar o celular
+      # do número enquanto o gateway estiver conectado, ou seja, sempre (relato de usuário, 08/11/2026).
+      # Mensagens continuam chegando e saindo; só o "online"/"visto por último" deixa de vir do gateway.
+      BAILEYS_MARK_ONLINE_ON_CONNECT: 'false'
 
       # Webhooks para containers da rede interna: o guarda de SSRF bloqueia hosts privados,
       # então cada app que recebe webhook entra nesta lista (nome do serviço na rede "openwa").
