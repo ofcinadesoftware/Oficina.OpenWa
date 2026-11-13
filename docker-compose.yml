@@ -80,6 +80,10 @@ services:
       # e usam session.* e message.ack; sem isso o OpenWA guardava todo o tráfego do número pareado
       # (histórico desde 2019 e todos os grupos da Lume: 1,3 GB em 13/11/2026, backup dobrando por dia).
       MESSAGE_RETENTION_DAYS: '3'
+      # Não baixa a mídia das mensagens recebidas (ia em base64 dentro do banco: 116 vídeos = 658 MB em
+      # 3 dias). Só afeta o recebimento; o envio continua igual. Religar se um app precisar ler mídia
+      # recebida (ex.: bot do Hikya Chat entendendo áudio ou foto).
+      MEDIA_DOWNLOAD_ENABLED: 'false'
 
       # Webhooks para containers da rede interna: o guarda de SSRF bloqueia hosts privados,
       # então cada app que recebe webhook entra nesta lista (nome do serviço na rede "openwa").
