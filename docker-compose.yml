@@ -76,6 +76,10 @@ services:
       # do número enquanto o gateway estiver conectado, ou seja, sempre (relato de usuário, 08/11/2026).
       # Mensagens continuam chegando e saindo; só o "online"/"visto por último" deixa de vir do gateway.
       BAILEYS_MARK_ONLINE_ON_CONNECT: 'false'
+      # Apaga do banco as mensagens com mais de 3 dias (roda ao subir e a cada 24h). Os apps só disparam
+      # e usam session.* e message.ack; sem isso o OpenWA guardava todo o tráfego do número pareado
+      # (histórico desde 2019 e todos os grupos da Lume: 1,3 GB em 13/11/2026, backup dobrando por dia).
+      MESSAGE_RETENTION_DAYS: '3'
 
       # Webhooks para containers da rede interna: o guarda de SSRF bloqueia hosts privados,
       # então cada app que recebe webhook entra nesta lista (nome do serviço na rede "openwa").
