@@ -23,7 +23,26 @@ ssh -i ~/.ssh/oficina_vps ubuntu@147.15.7.73 "echo 'commit=$(git rev-parse --sho
 
 O `tar` só sobrescreve os arquivos versionados; `.env`, `chaves-apps.env` e `painel-senha.txt` ficam intactos.
 
-Não há fork: as versões novas do OpenWA vêm direto do original (`git fetch --tags`), e nós escolhemos quando trocar de tag. Fork só se um dia precisarmos corrigir o código antes do autor.
+Não há fork: as versões novas do OpenWA vêm direto do original (`git fetch --tags`), e nós escolhemos quando trocar de tag. O que o original não tem e um app precisa vai como **patch** em `patches/`, aplicado sobre o tag antes do build (ver "Patches da Oficina").
+
+## Patches da Oficina
+
+O código do original não é commitado nem alterado à mão: cada mudança nossa é um arquivo em `patches/`, aplicado com `git apply` sobre o tag em uso, no PC e na VM, antes do build.
+
+| Patch | O que faz | Quem usa |
+|---|---|---|
+| `0001-send-copy-code.patch` (15/11/2026) | Rota `POST /api/sessions/{id}/messages/send-copy-code` `{ chatId, text, code, buttonText (até 20), footer? }`: texto com o botão nativo "copiar" (`cta_copy`) do WhatsApp, que copia `code`. Só Baileys (whatsapp-web.js responde 501). Papel OPERATOR, `Idempotency-Key` e limite de envio como o `send-text`; grava no histórico como texto (corpo + código) | Karfy: Pix copia e cola da cobrança avulsa. Sem o patch, a Karfy recebe 404 e manda o código em mensagem separada |
+
+O botão não é oficial: é a mensagem interativa que o WhatsApp Business manda, enviada por um cliente não oficial. Apareceu no iPhone e no WhatsApp Web em 15/11/2026 (mensagem de outra empresa, também por Baileys), mas o WhatsApp pode parar de mostrar a qualquer momento.
+
+```bash
+# aplicar (PC ou VM), com o clone limpo no tag em uso
+cd /opt/openwa            # no PC: Oficina.Software/OpenWA
+git status --short        # nada fora de oficina/; se houver, git checkout -- . antes
+for p in oficina/patches/*.patch; do git apply "$p"; done
+```
+
+Trocou de tag e o `git apply` falhou? O código mudou no original: refaça o patch sobre o tag novo (aplique com `git apply --3way`, resolva, gere de novo com `git diff > oficina/patches/<arquivo>`) e teste no PC antes da VM. Para tirar um patch: `git checkout -- .` e reaplique os outros.
 
 ## Onde roda
 
@@ -113,11 +132,19 @@ Regra de testes: mensagens de teste só para **5592991258492**.
 
 **Nosso deploy** (compose, backup, docs): commit e push aqui, depois envie para a VM (ver "Estrutura") e rode `docker compose up -d` em `/opt/openwa/oficina`.
 
+**Patch novo ou alterado**: teste no PC (aplicar, `npm ci && npm run build && npm run start:prod`, mensagem só para o número de teste), envie este repositório para a VM e lá:
+
+```bash
+cd /opt/openwa && git checkout -- . && for p in oficina/patches/*.patch; do git apply "$p"; done
+cd oficina && ./backup-openwa.sh && docker compose up -d --build
+```
+
 **Versão do OpenWA**: as versões saem em github.com/rmyndharis/OpenWA/releases. Nada atualiza sozinho. A VM não tem OpenWA de sandbox (produção e sandbox dos apps usam a mesma instância), então **toda versão nova e toda mudança de configuração é testada antes no OpenWA local do PC** (`Oficina.Software/OpenWA`, `npm ci && npm run build && npm run start:prod`, em `http://127.0.0.1:2785`). Só depois de testada vai para a VM:
 
 ```bash
 # na VM: trocar o tag e a versão juntos (o .env.exemplo do repositório também, para registrar)
-cd /opt/openwa && git fetch --tags && git checkout vX.Y.Z
+cd /opt/openwa && git fetch --tags && git checkout -- . && git checkout vX.Y.Z
+for p in oficina/patches/*.patch; do git apply "$p"; done   # ver "Patches da Oficina"
 sed -i 's/^OPENWA_VERSION=.*/OPENWA_VERSION=X.Y.Z/' oficina/.env
 cd oficina && ./backup-openwa.sh && docker compose up -d --build
 ```

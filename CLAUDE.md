@@ -3,7 +3,7 @@
 Esta é a sessão "OpenWA": dona do gateway de WhatsApp compartilhado pelos apps da Oficina (Hikya Chat, Karfy, Kid Money; produção e sandbox na mesma instância). Hospeda, atualiza, reinicia e configura o gateway. Os apps só consomem a API e os webhooks; a configuração do lado deles é com a sessão de cada app. O manual completo é o **README.md** desta pasta; o histórico, `docs/historico-cerebro.md` (pode estar velho, confira na VM).
 
 ## Mapa
-- `OpenWA/` (raiz): clone do original `rmyndharis/OpenWA`, no tag da versão em uso (hoje v0.26.0). **Não altere o código do original**; versões novas vêm de `git fetch --tags`.
+- `OpenWA/` (raiz): clone do original `rmyndharis/OpenWA`, no tag da versão em uso (hoje v0.26.0). **Não altere o código do original**; versões novas vêm de `git fetch --tags`. Mudança nossa no código vira patch em `oficina/patches/`, aplicado sobre o tag antes do build (README, "Patches da Oficina"); hoje há um, `0001-send-copy-code.patch` (botão "copiar código" para o Pix da Karfy).
 - `OpenWA/oficina/`: o nosso repositório (`ofcinadesoftware/Oficina.OpenWa`): compose, `.env.exemplo`, backup e documentação. O clone do original ignora esta pasta (`.git/info/exclude`).
 - **Antes de mexer, rode `git pull` em `oficina/`**: o clone local já ficou atrás do GitHub (em 10/11, local em bb5f13a e remoto com d2bef3e).
 - A VM recebe os arquivos sempre a partir de um commit (`git archive HEAD`), e `.versao-deploy` registra qual commit está lá (ver README, "Estrutura").

@@ -1,0 +1,431 @@
+diff --git a/src/engine/adapters/baileys-messaging.ts b/src/engine/adapters/baileys-messaging.ts
+index ac77e161..5294a945 100644
+--- a/src/engine/adapters/baileys-messaging.ts
++++ b/src/engine/adapters/baileys-messaging.ts
+@@ -13,6 +13,7 @@ import {
+   CustomLinkPreview,
+   ChatState,
+   ContactCard,
++  CopyCodeInput,
+   EngineEventCallbacks,
+   IncomingMessage,
+   LocationInput,
+@@ -615,6 +616,74 @@ export class BaileysMessaging {
+     );
+   }
+ 
++  /**
++   * Oficina patch: text with a native-flow `cta_copy` button. `sendMessage` has no content shape for
++   * `interactiveMessage`, so the message is built with `generateWAMessageFromContent` and relayed with
++   * the `biz` node WhatsApp expects on native-flow messages (without it phones may not render the button).
++   * Persisted, recorded and echoed like {@link sendTextMessage}.
++   */
++  async sendCopyCodeMessage(chatId: string, input: CopyCodeInput): Promise<MessageResult> {
++    this.host.ensureReady();
++    const socket = this.sock();
++    const b = await this.host.loadLib();
++    this.sock(socket);
++    const jid = await this.confirmRecipient(await this.toDeliverableJid(chatId, socket), socket);
++    const content = {
++      interactiveMessage: {
++        body: { text: input.text },
++        ...(input.footer ? { footer: { text: input.footer } } : {}),
++        nativeFlowMessage: {
++          buttons: [
++            {
++              name: 'cta_copy',
++              buttonParamsJson: JSON.stringify({
++                display_text: input.buttonText,
++                id: 'copy_code',
++                copy_code: input.code,
++              }),
++            },
++          ],
++          messageParamsJson: '',
++        },
++      },
++    };
++    const message = b.generateWAMessageFromContent(jid, content, {
++      userJid: socket.user?.id ?? '',
++      messageId: b.generateMessageIDV2(socket.user?.id),
++      ...(this.withEphemeral(jid) ?? {}),
++    });
++    try {
++      await socket.relayMessage(jid, message.message!, {
++        messageId: message.key.id!,
++        additionalNodes: [
++          {
++            tag: 'biz',
++            attrs: {},
++            content: [
++              {
++                tag: 'interactive',
++                attrs: { type: 'native_flow', v: '1' },
++                content: [{ tag: 'native_flow', attrs: { v: '9', name: 'mixed' } }],
++              },
++            ],
++          },
++        ],
++      });
++    } catch (error) {
++      if (this.host.getSocketOrNull() !== socket) throw new EngineNotReadyError();
++      throw mapSendRefusal(error);
++    }
++    this.host.rememberOwnSend(message.key.id);
++    void this.host.putStoredMessage(message)?.catch(err =>
++      this.host.logger.warn('Failed to persist sent message to store', {
++        error: err instanceof Error ? err.message : String(err),
++      }),
++    );
++    this.host.recordMessage(message, 'text');
++    void this.emitOwnSendEcho(message);
++    return { id: message.key.id ?? '', timestamp: this.host.toUnixSeconds(message.messageTimestamp) };
++  }
++
+   async replyToMessage(chatId: string, quotedMsgId: string, text: string, mentions?: string[]): Promise<MessageResult> {
+     this.host.ensureReady();
+     const socket = this.sock();
+@@ -948,6 +1017,24 @@ export class BaileysMessaging {
+     expected?: WASocket,
+   ): Promise<WAMessage | undefined> {
+     const sock = this.sock(expected);
++    jid = await this.confirmRecipient(jid, sock);
++    let sent: WAMessage | undefined;
++    try {
++      sent = options ? await sock.sendMessage(jid, content, options) : await sock.sendMessage(jid, content);
++    } catch (error) {
++      if (this.host.getSocketOrNull() !== sock) throw new EngineNotReadyError();
++      throw mapSendRefusal(error);
++    }
++    // Mutations are announced by their library echo; no local callback replaces it.
++    if (!('react' in content || 'delete' in content || 'edit' in content)) this.host.rememberOwnSend(sent?.key?.id);
++    return sent;
++  }
++
++  /**
++   * A user recipient must be registered on WhatsApp; returns the jid to deliver to (the canonical one when
++   * the number check resolved to another). Shared by {@link send} and the relay of a copy-code message.
++   */
++  private async confirmRecipient(jid: string, sock: WASocket): Promise<string> {
+     if (parseWaId(jid).kind === 'user') {
+       let numberId: string | null;
+       try {
+@@ -962,16 +1049,7 @@ export class BaileysMessaging {
+       if (canonical !== jid) jid = await this.toDeliverableJid(numberId);
+     }
+     if (this.host.getSocketOrNull() !== sock) throw new EngineNotReadyError();
+-    let sent: WAMessage | undefined;
+-    try {
+-      sent = options ? await sock.sendMessage(jid, content, options) : await sock.sendMessage(jid, content);
+-    } catch (error) {
+-      if (this.host.getSocketOrNull() !== sock) throw new EngineNotReadyError();
+-      throw mapSendRefusal(error);
+-    }
+-    // Mutations are announced by their library echo; no local callback replaces it.
+-    if (!('react' in content || 'delete' in content || 'edit' in content)) this.host.rememberOwnSend(sent?.key?.id);
+-    return sent;
++    return jid;
+   }
+ 
+   /**
+diff --git a/src/engine/adapters/baileys.adapter.spec.ts b/src/engine/adapters/baileys.adapter.spec.ts
+index 570bb88a..14748eb3 100644
+--- a/src/engine/adapters/baileys.adapter.spec.ts
++++ b/src/engine/adapters/baileys.adapter.spec.ts
+@@ -48,6 +48,7 @@ class FakeSock extends EventEmitter {
+   public query = jest.fn().mockResolvedValue({ tag: 'iq', attrs: { type: 'result' } });
+   public generateMessageTag = jest.fn().mockReturnValue('TAG-1');
+   public sendMessage = jest.fn();
++  public relayMessage = jest.fn().mockResolvedValue('RELAYED');
+   public onWhatsApp = jest.fn();
+   public sendPresenceUpdate = jest.fn().mockResolvedValue(undefined);
+   public groupFetchAllParticipating = jest.fn();
+@@ -164,6 +165,15 @@ jest.mock('@whiskeysockets/baileys', () => ({
+     }
+   },
+   getContentType: jest.fn(() => 'conversation'),
++  // Oficina patch (send-copy-code): builds the WAMessage that relayMessage sends.
++  generateMessageIDV2: jest.fn(() => 'COPY1'),
++  generateWAMessageFromContent: jest.fn(
++    (jid: string, message: unknown, options: { messageId: string; timestamp?: Date }) => ({
++      key: { remoteJid: jid, fromMe: true, id: options.messageId },
++      message,
++      messageTimestamp: 1700000002,
++    }),
++  ),
+   // The adapter now downloads via 'stream' mode, so resolve to an async-iterable of chunks (factory is
+   // hoisted above imports, so this stays inline; tests override with the `streamOf` helper below).
+   downloadMediaMessage: jest.fn(() =>
+@@ -1922,6 +1932,49 @@ describe('BaileysAdapter messaging', () => {
+     expect(res).toEqual({ id: 'OUT1', timestamp: 1700000001 });
+   });
+ 
++  // Oficina patch: send-copy-code.
++  it('sendCopyCodeMessage relays a native-flow cta_copy button with the biz node', async () => {
++    const adapter = await readyAdapter();
++    const res = await adapter.sendCopyCodeMessage('628111@s.whatsapp.net', {
++      text: 'Pague o Pix',
++      code: '000201PIX',
++      buttonText: 'Copiar código Pix',
++    });
++    expect(fakeSock.sendMessage).not.toHaveBeenCalled();
++    expect(fakeSock.relayMessage).toHaveBeenCalledTimes(1);
++    const [jid, message, options] = fakeSock.relayMessage.mock.calls[0] as [
++      string,
++      {
++        interactiveMessage: {
++          body: { text: string };
++          nativeFlowMessage: { buttons: { name: string; buttonParamsJson: string }[] };
++        };
++      },
++      { messageId: string; additionalNodes: { tag: string }[] },
++    ];
++    expect(jid).toBe('628111@s.whatsapp.net');
++    expect(message.interactiveMessage.body.text).toBe('Pague o Pix');
++    const [button] = message.interactiveMessage.nativeFlowMessage.buttons;
++    expect(button.name).toBe('cta_copy');
++    expect(JSON.parse(button.buttonParamsJson)).toEqual({
++      display_text: 'Copiar código Pix',
++      id: 'copy_code',
++      copy_code: '000201PIX',
++    });
++    expect(options.messageId).toBe('COPY1');
++    expect(options.additionalNodes[0].tag).toBe('biz');
++    expect(res).toEqual({ id: 'COPY1', timestamp: 1700000002 });
++  });
++
++  it('sendCopyCodeMessage refuses an unregistered recipient before relaying', async () => {
++    fakeSock.onWhatsApp.mockResolvedValue([{ jid: '628111@s.whatsapp.net', exists: false }]);
++    const adapter = await readyAdapter();
++    await expect(
++      adapter.sendCopyCodeMessage('628111@s.whatsapp.net', { text: 't', code: 'c', buttonText: 'b' }),
++    ).rejects.toBeInstanceOf(BadRequestException);
++    expect(fakeSock.relayMessage).not.toHaveBeenCalled();
++  });
++
+   // The socket a send is handed to can be torn down while the library is still writing to it: a
+   // stop or logout then answers 409 like any other interrupted send, not a raw Connection Closed 500.
+   it('a send whose socket is torn down while it is in flight reads as not ready', async () => {
+diff --git a/src/engine/adapters/baileys.adapter.ts b/src/engine/adapters/baileys.adapter.ts
+index 58619615..0c808187 100644
+--- a/src/engine/adapters/baileys.adapter.ts
++++ b/src/engine/adapters/baileys.adapter.ts
+@@ -22,6 +22,7 @@ import {
+   Catalog,
+   Contact,
+   ContactCard,
++  CopyCodeInput,
+   EngineEventCallbacks,
+   EngineStatus,
+   Group,
+@@ -358,6 +359,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
+     return this.messaging.sendPollMessage(chatId, poll);
+   }
+ 
++  async sendCopyCodeMessage(chatId: string, input: CopyCodeInput): Promise<MessageResult> {
++    return this.messaging.sendCopyCodeMessage(chatId, input);
++  }
++
+   async replyToMessage(chatId: string, quotedMsgId: string, text: string, mentions?: string[]): Promise<MessageResult> {
+     return this.messaging.replyToMessage(chatId, quotedMsgId, text, mentions);
+   }
+diff --git a/src/engine/interfaces/whatsapp-engine.interface.ts b/src/engine/interfaces/whatsapp-engine.interface.ts
+index 2874fddc..b12b337f 100644
+--- a/src/engine/interfaces/whatsapp-engine.interface.ts
++++ b/src/engine/interfaces/whatsapp-engine.interface.ts
+@@ -413,6 +413,21 @@ export interface PollInput extends Quotable {
+   allowMultipleAnswers?: boolean;
+ }
+ 
++/**
++ * Oficina patch: a text with a native-flow "copy code" button (`cta_copy`), e.g. a Pix copy-and-paste
++ * code. Tapping the button copies `code` to the recipient's clipboard.
++ */
++export interface CopyCodeInput {
++  /** Message body shown above the button. */
++  text: string;
++  /** Value copied to the clipboard when the button is tapped. */
++  code: string;
++  /** Button label. */
++  buttonText: string;
++  /** Optional small text under the body. */
++  footer?: string;
++}
++
+ export interface ReactionSender {
+   senderId: string;
+   emoji: string;
+@@ -1210,6 +1225,9 @@ export interface MessagingCapability {
+ 
+   sendPollMessage(chatId: string, poll: PollInput): Promise<MessageResult>;
+ 
++  /** Oficina patch: text with a "copy code" button. Baileys only; absent on engines that cannot send it. */
++  sendCopyCodeMessage?(chatId: string, input: CopyCodeInput): Promise<MessageResult>;
++
+   /**
+    * Reply to a message, quoting it. `mentions` tags participants exactly as on the send routes: the
+    * text must also carry the matching `@<number>` token for WhatsApp to render the tag.
+diff --git a/src/modules/auth/role-coverage.spec.ts b/src/modules/auth/role-coverage.spec.ts
+index 1ad7724c..162176cc 100644
+--- a/src/modules/auth/role-coverage.spec.ts
++++ b/src/modules/auth/role-coverage.spec.ts
+@@ -131,6 +131,7 @@ describe('role of every message and session route', () => {
+     sendContact: ApiKeyRole.OPERATOR,
+     sendSticker: ApiKeyRole.OPERATOR,
+     sendPoll: ApiKeyRole.OPERATOR,
++    sendCopyCode: ApiKeyRole.OPERATOR, // Oficina patch
+     reply: ApiKeyRole.OPERATOR,
+     clickButton: ApiKeyRole.OPERATOR,
+     forward: ApiKeyRole.OPERATOR,
+diff --git a/src/modules/message/dto/message-actions.dto.ts b/src/modules/message/dto/message-actions.dto.ts
+index 4a668a48..6ed70907 100644
+--- a/src/modules/message/dto/message-actions.dto.ts
++++ b/src/modules/message/dto/message-actions.dto.ts
+@@ -166,6 +166,45 @@ export class SendPollDto {
+   quotedMessageId?: string;
+ }
+ 
++/** Oficina patch: text with a "copy code" button (Pix copy-and-paste). Baileys only. */
++export class SendCopyCodeDto {
++  @ApiProperty({ description: 'Chat ID (e.g. 628123456789@c.us)', maxLength: CHAT_ID_MAX_LENGTH })
++  @ToStrictString()
++  @IsString()
++  @IsNotEmpty()
++  @MaxLength(CHAT_ID_MAX_LENGTH)
++  @Matches(CHAT_JID_PATTERN, { message: CHAT_JID_MESSAGE })
++  chatId!: string;
++
++  @ApiProperty({ description: 'Message body shown above the button', maxLength: MESSAGE_TEXT_MAX_LENGTH })
++  @ToStrictString()
++  @IsString()
++  @IsNotEmpty()
++  @MaxLength(MESSAGE_TEXT_MAX_LENGTH)
++  text!: string;
++
++  @ApiProperty({ description: 'Value copied when the button is tapped', maxLength: 1024 })
++  @ToStrictString()
++  @IsString()
++  @IsNotEmpty()
++  @MaxLength(1024)
++  code!: string;
++
++  @ApiProperty({ description: 'Button label', maxLength: 20, example: 'Copiar código Pix' })
++  @ToStrictString()
++  @IsString()
++  @IsNotEmpty()
++  @MaxLength(20)
++  buttonText!: string;
++
++  @ApiPropertyOptional({ description: 'Small text under the body', maxLength: 60 })
++  @IsOptional()
++  @ToStrictString()
++  @IsString()
++  @MaxLength(60)
++  footer?: string;
++}
++
+ export class ReplyMessageDto {
+   @ApiProperty({ maxLength: CHAT_ID_MAX_LENGTH })
+   @ToStrictString()
+diff --git a/src/modules/message/message-send.service.ts b/src/modules/message/message-send.service.ts
+index a14c05ab..221322e7 100644
+--- a/src/modules/message/message-send.service.ts
++++ b/src/modules/message/message-send.service.ts
+@@ -1,6 +1,7 @@
+ import { Injectable, BadRequestException, Optional } from '@nestjs/common';
+ import { ConfigService } from '@nestjs/config';
+ import { markEngineSendFailure } from '../../common/errors/engine-send-failure';
++import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
+ import { mergeSentMetadata, updateMessageMetadata } from './message-metadata';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { In, Repository, QueryDeepPartialEntity } from 'typeorm';
+@@ -540,6 +541,34 @@ export class MessageSendService {
+     return this.persistSentState(message, result);
+   }
+ 
++  /** Oficina patch: text with a "copy code" button. Persisted as text (body + code), so history stays readable. */
++  async sendCopyCode(
++    sessionId: string,
++    dto: { chatId: string; text: string; code: string; buttonText: string; footer?: string },
++  ): Promise<MessageResponseDto> {
++    const { message, finalDto, engine } = await this.applySendingGate(sessionId, 'text', dto, finalDto => ({
++      chatId: finalDto.chatId,
++      body: `${finalDto.text}\n\n${finalDto.code}`,
++      type: 'text',
++    }));
++
++    await this.simulateTypingIfEnabled(engine, finalDto.chatId, finalDto.text);
++
++    let result: MessageResult;
++    try {
++      if (!engine.sendCopyCodeMessage) throw new EngineNotSupportedError('sendCopyCodeMessage');
++      result = await engine.sendCopyCodeMessage(finalDto.chatId, {
++        text: finalDto.text,
++        code: finalDto.code,
++        buttonText: finalDto.buttonText,
++        footer: finalDto.footer,
++      });
++    } catch (error) {
++      return this.failSend(sessionId, 'text', message, finalDto, error);
++    }
++    return this.persistSentState(message, result);
++  }
++
+   async sendSticker(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
+     const {
+       message,
+diff --git a/src/modules/message/message.controller.ts b/src/modules/message/message.controller.ts
+index 38efc2c4..35d20e64 100644
+--- a/src/modules/message/message.controller.ts
++++ b/src/modules/message/message.controller.ts
+@@ -35,6 +35,7 @@ import {
+   SendLocationDto,
+   SendContactDto,
+   SendPollDto,
++  SendCopyCodeDto,
+   ReplyMessageDto,
+   ForwardMessageDto,
+   ReactMessageDto,
+@@ -461,6 +462,23 @@ export class MessageController {
+     return this.messageService.sendPoll(sessionId, dto);
+   }
+ 
++  // Oficina patch: text with a native-flow "copy code" button (Pix copy-and-paste). Baileys only.
++  @ChatScoped('fenced')
++  @Post('send-copy-code')
++  @IdempotentSend()
++  @RequireRole(ApiKeyRole.OPERATOR)
++  @ApiOperation({ summary: 'Send a text with a "copy code" button (Baileys only; Oficina patch)' })
++  @ApiParam({ name: 'sessionId', description: 'Session ID' })
++  @ApiBody({ type: SendCopyCodeDto })
++  @ApiResponse({ status: 201, description: 'Message sent', type: MessageResponseDto })
++  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
++  @ApiResponse({ status: 400, description: RECIPIENT_UNREACHABLE_400 })
++  @ApiResponse({ status: 501, description: 'The active engine (whatsapp-web.js) cannot send native-flow buttons' })
++  @ApiResponse({ status: 503, description: SEND_503 })
++  async sendCopyCode(@Param('sessionId') sessionId: string, @Body() dto: SendCopyCodeDto): Promise<MessageResponseDto> {
++    return this.messageService.sendCopyCode(sessionId, dto);
++  }
++
+   @ChatQuotedAllowed()
+   @ChatScoped('fenced')
+   @Post('reply')
+diff --git a/src/modules/message/message.service.ts b/src/modules/message/message.service.ts
+index 7841c487..feffea4c 100644
+--- a/src/modules/message/message.service.ts
++++ b/src/modules/message/message.service.ts
+@@ -279,6 +279,14 @@ export class MessageService implements PluginMessagePort {
+     return this.sender.sendPoll(sessionId, dto);
+   }
+ 
++  /** Oficina patch: text with a "copy code" button. */
++  sendCopyCode(
++    sessionId: string,
++    dto: { chatId: string; text: string; code: string; buttonText: string; footer?: string },
++  ): Promise<MessageResponseDto> {
++    return this.sender.sendCopyCode(sessionId, dto);
++  }
++
+   sendSticker(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
+     return this.sender.sendSticker(sessionId, dto);
+   }
